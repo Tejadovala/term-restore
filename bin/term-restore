@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Launcher: runs term_restore straight from the checkout, no install step.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+PY="${TERM_RESTORE_PYTHON:-python3}"
+if ! "$PY" -c 'import sys; raise SystemExit(sys.version_info < (3, 8))' 2>/dev/null; then
+    echo "term-restore needs Python 3.8+ (Ubuntu 20.04 or newer); found $("$PY" -V 2>&1)" >&2
+    exit 1
+fi
+exec env PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" "$PY" -m term_restore "$@"

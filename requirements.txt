@@ -1,0 +1,2 @@
+# term-restore runs on the Python standard library alone -- no runtime deps.
+# Python 3.10+ (uses X | None annotations).
