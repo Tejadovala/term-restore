@@ -311,10 +311,14 @@ def _execute_serially(plans, backend: Backend):
 
 
 def execute(plans, backend=None):
-    """Launch every planned tab. Returns (tabs_opened, warnings)."""
+    """Launch every planned tab. Returns (tabs_opened, warnings, mode).
+
+    `mode` records which path ran -- it is the only evidence at login of
+    whether the tabs were grouped into one window or opened one at a time.
+    """
     backend = backend or GNOME_TERMINAL
     if not plans:
-        return 0, []
+        return 0, [], "nothing"
     for plan in plans:
         if plan.log:
             recording.prepare_replay(Path(plan.log))
@@ -324,18 +328,19 @@ def execute(plans, backend=None):
         opened, batch_warnings = _execute_batch(plans, backend)
         if opened == len(plans):
             _prune_logs(plans)
-            return opened, batch_warnings
+            return opened, batch_warnings, "one window"
         warnings += batch_warnings
         if opened:
             # Tabs are already open; opening them again would double them.
             _prune_logs(plans)
-            return opened, warnings + ["some tabs may be in their own window"]
+            return (opened, warnings + ["some tabs may be in their own window"],
+                    "partial")
         warnings.append("single-window launch failed; falling back to one "
                         "invocation per tab")
 
     opened, serial_warnings = _execute_serially(plans, backend)
     _prune_logs(plans)
-    return opened, warnings + serial_warnings
+    return opened, warnings + serial_warnings, "one tab at a time"
 
 
 def _prune_logs(plans) -> None:

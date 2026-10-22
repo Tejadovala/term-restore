@@ -43,6 +43,24 @@ def arm():
     print("\nNow reboot. Afterwards run:  {}".format(SELF))
 
 
+def _terminal_windows() -> int:
+    """Count gnome-terminal windows via xprop. The tool itself never does this
+    -- it is deliberately stdlib-only -- but a test harness may."""
+    try:
+        roots = subprocess.run(["xprop", "-root", "_NET_CLIENT_LIST"],
+                               capture_output=True, text=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        return -1
+    ids = roots.partition("#")[2].replace(" ", "").split(",")
+    count = 0
+    for wid in [i for i in ids if i.startswith("0x")]:
+        cls = subprocess.run(["xprop", "-id", wid, "WM_CLASS"],
+                             capture_output=True, text=True).stdout
+        if "gnome-terminal" in cls:
+            count += 1
+    return count
+
+
 def journal_result():
     """What the autostart entry reported this boot.
 
@@ -90,6 +108,16 @@ def check():
     print("    {}  tabs reopened     {}".format(
         mark(full), line.strip() if line else "nothing in the journal"))
 
+    # The journal line is the authority on grouping: the tool itself cannot see
+    # which window a tab is in, so it reports which launch path it took.
+    grouped = "one window" in line
+    print("    {}  one window        {}".format(
+        mark(grouped),
+        "launched as a single invocation" if grouped
+        else "opened one tab at a time -- they are in separate windows"))
+    print("    {}note{}  gnome-terminal windows open now: {}".format(
+        DIM, RESET, _terminal_windows()))
+
     # Informational only -- tabs you closed since login are not failures.
     live = probe.take_snapshot()
     got = Counter(t.cwd for t in live.tabs)
@@ -102,7 +130,7 @@ def check():
 
     print()
     subprocess.run([str(ROOT / "bin" / "term-restore"), "doctor"])
-    passed = rebooted and marker.exists() and full
+    passed = rebooted and marker.exists() and full and grouped
     print("\n  {}".format("ALL CHECKS PASSED" if passed else "SOME CHECKS FAILED"))
     return 0 if passed else 1
 

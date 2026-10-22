@@ -305,7 +305,39 @@ def test_boot_guard_skips_the_open_tab_check(monkeypatch):
     from term_restore.model import Snapshot as S
     store.save(S(terminal="gnome-terminal", boot_id="old", tabs=[Tab(cwd="/etc")]))
     monkeypatch.setattr(cli.probe, "detect", lambda *a, **k: (None, [1, 2, 3]))
-    monkeypatch.setattr(cli.restore, "execute", lambda *a, **k: (1, []))
+    monkeypatch.setattr(cli.restore, "execute", lambda *a, **k: (1, [], "one window"))
     args = cli.build_parser().parse_args(["restore", "--boot-guard"])
     assert cli.cmd_restore(args) == 0
     assert paths.restore_marker(paths.boot_id()).exists()
+
+
+def test_execute_reports_which_launch_path_ran(monkeypatch):
+    """At login the journal line is the only evidence of whether the tabs were
+    grouped into one window or opened one at a time."""
+    plans = plan_for([Tab(cwd="/etc"), Tab(cwd="/var/log")])
+    monkeypatch.setattr(restore, "_run", lambda argv: (True, ""))
+    monkeypatch.setattr(restore, "_execute_batch",
+                        lambda p, b: (len(p), []))
+    monkeypatch.setattr(restore, "_prune_logs", lambda p: None)
+    from term_restore.terminals import GNOME_TERMINAL
+    opened, _, mode = restore.execute(plans, GNOME_TERMINAL)
+    assert (opened, mode) == (2, "one window")
+
+
+def test_execute_reports_the_serial_fallback(monkeypatch):
+    plans = plan_for([Tab(cwd="/etc"), Tab(cwd="/var/log")])
+    monkeypatch.setattr(restore, "_execute_batch", lambda p, b: (0, ["boom"]))
+    monkeypatch.setattr(restore, "_execute_serially", lambda p, b: (len(p), []))
+    monkeypatch.setattr(restore, "_prune_logs", lambda p: None)
+    from term_restore.terminals import GNOME_TERMINAL
+    opened, warnings, mode = restore.execute(plans, GNOME_TERMINAL)
+    assert mode == "one tab at a time"
+    assert any("falling back" in w for w in warnings)
+
+
+def test_a_backend_that_cannot_batch_reports_serial(monkeypatch):
+    from term_restore.terminals import KONSOLE
+    plans = plan_for([Tab(cwd="/etc")], backend=KONSOLE)
+    monkeypatch.setattr(restore, "_execute_serially", lambda p, b: (1, []))
+    monkeypatch.setattr(restore, "_prune_logs", lambda p: None)
+    assert restore.execute(plans, KONSOLE)[2] == "one tab at a time"

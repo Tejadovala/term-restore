@@ -144,12 +144,13 @@ def cmd_restore(args) -> int:
             print("  warning: " + warning, file=sys.stderr)
         return 0
 
-    opened, errors = restore.execute(plans, backend)
+    opened, errors, mode = restore.execute(plans, backend)
     warnings += errors
     if opened:
         marker.write_text(time.strftime("%Y-%m-%d %H:%M:%S") + "\n")
         store.prune_markers(boot)
-    print("restored {}/{} tab(s)".format(opened, len(plans)))
+    print("restored {}/{} tab(s), {} [{}]".format(
+        opened, len(plans), mode, backend.name))
     for warning in warnings:
         print("  warning: " + warning, file=sys.stderr)
     return 0 if opened and not warnings else 1
