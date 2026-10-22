@@ -200,3 +200,7 @@ created `0700` with files `0600`, and are pruned when no snapshot refers to them
   does not, so `install` falls back to `default.target` there. The autostart
   delay uses `sh -c 'sleep N; …'` rather than `X-GNOME-Autostart-Delay`, which
   only GNOME reads.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
