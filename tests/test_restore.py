@@ -275,3 +275,37 @@ def test_a_backend_that_cannot_batch_still_plans_per_tab():
     plans = plan_for([Tab(cwd="/etc"), Tab(cwd="/var/log")], backend=KONSOLE)
     assert plans[0].argv[0] == "konsole"
     assert "--new-tab" in plans[1].argv
+
+
+def test_restore_refuses_over_open_tabs(monkeypatch, capsys):
+    """Restoring never merges into an existing window, so running it while tabs
+    are open silently doubles every tab -- and the daemon then records that."""
+    from term_restore import cli, store
+    from term_restore.model import Snapshot as S
+    store.save(S(terminal="gnome-terminal", boot_id="old", tabs=[Tab(cwd="/etc")]))
+    monkeypatch.setattr(cli.probe, "detect", lambda *a, **k: (None, [1, 2, 3]))
+    args = cli.build_parser().parse_args(["restore"])
+    assert cli.cmd_restore(args) == 1
+    assert "already open" in capsys.readouterr().err
+
+
+def test_force_overrides_the_open_tab_check(monkeypatch):
+    from term_restore import cli, store
+    from term_restore.model import Snapshot as S
+    store.save(S(terminal="gnome-terminal", boot_id="old", tabs=[Tab(cwd="/etc")]))
+    monkeypatch.setattr(cli.probe, "detect", lambda *a, **k: (None, [1, 2, 3]))
+    args = cli.build_parser().parse_args(["restore", "--force", "--dry-run"])
+    assert cli.cmd_restore(args) == 0
+
+
+def test_boot_guard_skips_the_open_tab_check(monkeypatch):
+    """At login nothing is open yet; the boot marker already prevents repeats,
+    and a terminal autostarted by the desktop must not block the restore."""
+    from term_restore import cli, paths, store
+    from term_restore.model import Snapshot as S
+    store.save(S(terminal="gnome-terminal", boot_id="old", tabs=[Tab(cwd="/etc")]))
+    monkeypatch.setattr(cli.probe, "detect", lambda *a, **k: (None, [1, 2, 3]))
+    monkeypatch.setattr(cli.restore, "execute", lambda *a, **k: (1, []))
+    args = cli.build_parser().parse_args(["restore", "--boot-guard"])
+    assert cli.cmd_restore(args) == 0
+    assert paths.restore_marker(paths.boot_id()).exists()

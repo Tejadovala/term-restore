@@ -188,6 +188,11 @@ created `0700` with files `0600`, and are pruned when no snapshot refers to them
 - **An empty snapshot never overwrites a good one.** At shutdown the tabs may
   close before the daemon stops; without that guard a reboot would wipe the
   snapshot it was meant to preserve.
+- **Restoring never merges into an existing window** -- it always opens a new
+  one. Run it by hand while tabs are open and you get a second copy of every
+  saved tab, and the daemon records the doubled state. `restore` therefore
+  refuses when tabs are already open; `--force` overrides. `--boot-guard` skips
+  the check, since nothing is open at login.
 - `restore --boot-guard` (what autostart uses) is a no-op if a restore already
   happened since this boot, and refuses a snapshot taken during the current
   boot. Both stop duplicate tabs piling up. The marker is written only if a tab

@@ -107,6 +107,21 @@ def cmd_restore(args) -> int:
         return 0
 
     backend = restore.resolve_backend(snapshot, args.terminal)
+
+    # Restoring always opens a new window; it never merges into an existing
+    # one. Run it while tabs are open and you get a second copy of every tab
+    # alongside the originals -- and the daemon then records the doubled state.
+    # At login (--boot-guard) nothing is open yet, so the check only applies to
+    # a restore invoked by hand.
+    if not args.boot_guard and not args.force:
+        live = probe.detect(prefer=backend.name)[1]
+        if live:
+            print("{} tab(s) are already open; restoring would open a second "
+                  "copy of every saved tab in a new window.\n"
+                  "Close them first, or pass --force to do it anyway."
+                  .format(len(live)), file=sys.stderr)
+            return 1
+
     plans, warnings = restore.build_plan(
         snapshot, prefill=not args.no_history, backend=backend,
         max_tabs=args.max_tabs, announce=not args.quiet,
@@ -237,7 +252,8 @@ def build_parser():
     rest.add_argument("--dry-run", action="store_true",
                       help="print the launch plan, open nothing")
     rest.add_argument("--force", action="store_true",
-                      help="restore even from a same-boot snapshot")
+                      help="restore even from a same-boot snapshot, or while "
+                           "tabs are already open (this duplicates them)")
     rest.add_argument("--boot-guard", action="store_true",
                       help="no-op if already restored since boot (autostart uses this)")
     rest.add_argument("--no-history", action="store_true",
