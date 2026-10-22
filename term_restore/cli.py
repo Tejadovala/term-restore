@@ -168,8 +168,27 @@ def cmd_uninstall(args) -> int:
     return 0
 
 
+def _os_name() -> str:
+    try:
+        fields = dict(
+            line.split("=", 1) for line in
+            Path("/etc/os-release").read_text().splitlines() if "=" in line)
+        return fields.get("PRETTY_NAME", "?").strip('"')
+    except OSError:
+        return "unknown"
+
+
+def _last_restore() -> str:
+    proc = subprocess.run(
+        ["journalctl", "--user", "-b", "--no-pager", "-o", "cat"],
+        capture_output=True, text=True, errors="replace")
+    hits = [l for l in proc.stdout.splitlines() if "tab(s)" in l and "restored" in l]
+    return hits[-1].strip() if hits else "no restore recorded this boot"
+
+
 def cmd_doctor(args) -> int:
     import os
+    import shutil
     ok = True
 
     def check(label, good, detail):
@@ -177,35 +196,50 @@ def cmd_doctor(args) -> int:
         ok = ok and good
         print("  [{}] {:<16} {}".format("ok" if good else "--", label, detail))
 
+    def note(label, detail):
+        print("  [--] {:<16} {}".format(label, detail))
+
     print("term-restore doctor")
+    note("os", _os_name())
+    note("desktop", "{} / {}".format(
+        os.environ.get("XDG_CURRENT_DESKTOP", "?"),
+        os.environ.get("XDG_SESSION_TYPE", "?")))
     check("python", sys.version_info >= (3, 8),
           "{}.{}.{}".format(*sys.version_info[:3]))
+    check("script", shutil.which("script") is not None,
+          shutil.which("script") or "missing -- scrollback cannot be recorded")
 
     table = probe.ProcTable.scan()
     running = [(b, table.tab_shells(b)) for b in terminals.BACKENDS
                if table.server_pids(b)]
     if running:
         for backend, shells in running:
-            check("terminal", True, "{} -- {} tab(s){}".format(
+            check("terminal", True, "{} -- {} tab(s){}{}".format(
                 backend.name, len(shells),
-                "" if backend.verified else "  (backend untested)"))
+                "" if backend.verified else "  BACKEND UNTESTED",
+                "" if backend.can_batch else "  (cannot group tabs in one window)"))
     else:
-        check("terminal", False, "no supported terminal running (looked for {})"
+        check("terminal", False,
+              "no supported terminal running. Looked for: {}. If this machine "
+              "uses a different one, term-restore cannot see its tabs."
               .format(", ".join(terminals.names())))
 
-    session = os.environ.get("XDG_SESSION_TYPE", "unknown")
-    check("session", True, session + (
-        "  (window size is not restored under Wayland)"
-        if session == "wayland" else ""))
+    if os.environ.get("XDG_SESSION_TYPE") == "wayland":
+        note("wayland", "window size is not restored under Wayland")
 
-    proc = subprocess.run(["systemctl", "--user", "is-active", installer.SERVICE],
-                          capture_output=True, text=True)
-    check("snapshot daemon", proc.stdout.strip() == "active",
-          proc.stdout.strip() or "unknown")
+    unit = installer.config_root() / "systemd" / "user" / installer.SERVICE
+    state = subprocess.run(["systemctl", "--user", "is-active", installer.SERVICE],
+                           capture_output=True, text=True).stdout.strip()
+    enabled = subprocess.run(["systemctl", "--user", "is-enabled", installer.SERVICE],
+                             capture_output=True, text=True).stdout.strip()
+    check("snapshot daemon", state == "active",
+          "{}, {} ({})".format(state or "unknown", enabled or "not enabled",
+                               "unit present" if unit.exists() else "NO UNIT FILE"))
+    note("wanted by", installer.wanted_by())
 
     autostart = installer.config_root() / "autostart" / "term-restore.desktop"
     check("autostart", autostart.exists(),
-          str(autostart) if autostart.exists() else "not installed")
+          str(autostart) if autostart.exists() else "not installed -- run `install`")
 
     snapshot = store.load()
     if snapshot:
@@ -214,11 +248,11 @@ def cmd_doctor(args) -> int:
                       int(time.time() - snapshot.saved_at)))
     else:
         check("snapshot", False, "none yet")
-    print("  [--] {:<16} {} kept in {}".format(
-        "archives", len(store.history()), paths.history_dir()))
+    note("last restore", _last_restore())
+    note("archives", "{} in {}".format(len(store.history()), paths.history_dir()))
     recorded = sum(1 for t in (snapshot.tabs if snapshot else []) if t.log)
-    print("  [--] {:<16} {} tab(s) recording, {:.1f} MB in {}".format(
-        "scrollback", recorded, recording.total_size() / 1e6, recording.logs_dir()))
+    note("scrollback", "{} tab(s) recording, {:.1f} MB".format(
+        recorded, recording.total_size() / 1e6))
     return 0 if ok else 1
 
 
